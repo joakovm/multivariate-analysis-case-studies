@@ -20,10 +20,10 @@ Requisitos:
 - [Quarto](https://quarto.org/)
 - Paquetes de R usados: `dplyr`, `kableExtra`, `agricolae`, `MASS`, `vegan`, `MVN`, `mvnormtest`, `cluster`, `ggplot2` (cada script los instala automáticamente si no los encuentra)
 
-\`\`\`bash
+```bash
 quarto render amanita-ponderosa-mineral-analysis/caracterizacion-inorganica-amanita-ponderosa.qmd
 quarto render normality-clustering-discriminant-analysis/metodos-multivariantes-normalidad-clustering-discriminante.qmd
-\`\`\`
+```
 
 ## Datos
 
