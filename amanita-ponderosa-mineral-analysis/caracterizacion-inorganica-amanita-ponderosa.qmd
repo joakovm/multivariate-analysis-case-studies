@@ -1,0 +1,337 @@
+---
+title: "Caracterización de la composición mineral en *Amanita ponderosa*"
+subtitle: "Un análisis multivariante mediante PCA y escalado multidimensional no métrico"
+author: "Joaquín Villegas"
+lang: es
+format:
+  pdf:
+    toc: true
+    number-sections: true
+editor: visual
+---
+
+```{r}
+#| include: false
+options(repos = c(CRAN = "https://cran.rediris.es/"))
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+library(dplyr)
+library(kableExtra)
+if (!requireNamespace("agricolae", quietly = TRUE)) install.packages("agricolae")
+library(agricolae)
+library(MASS)
+if (!requireNamespace("vegan", quietly = TRUE)) install.packages("vegan")
+library(vegan)
+```
+
+\newpage
+
+## Estadística descriptiva y comparación entre sitios de muestreo
+
+### Estadísticos descriptivos por sitio de muestreo
+
+Carga de los datos del archivo amanita_ponderosa.RData \[1\].
+
+```{r}
+load("amanita_ponderosa.RData")
+```
+
+Tabla 2, medias y desviaciones estándar \[2\].
+
+```{r}
+table2 <- contents %>% group_by(site) %>%
+  summarise(
+    moisture = sprintf("%.2f ± %.2f",
+    mean(moisture), sd(moisture)),
+    organic.content = sprintf("%.2f ± %.2f",
+    mean(organic.content), sd(organic.content)),
+    minerals = sprintf("%.2f ± %.2f",
+    mean(minerals), sd(minerals)))
+table2$site <- sampling_sites[table2$site]
+head(table2) %>%
+  kableExtra::kable() %>%
+  kableExtra::kable_styling()
+```
+
+Estadísticos de la figura 2.
+
+```{r}
+contents_num <- contents[,-c(4, 5)]
+sprintf("%.2f ± %.2f",
+    sapply(contents_num, mean),
+    sapply(contents_num, sd))
+```
+
+### Comparación de medias entre sitios mediante el test LSD
+
+El test LSD permite agrupar los "sites" cuya diferencia de media no es significativa asignando a estos "sites" una o varias letras. Si dos "sites" pertenecen al mismo grupo (comparten la misma letra) significa que sus medias no son significativamente diferentes \[3\].
+
+Esto mismo ocurre con la media de la humedad y el contenido orgánico del cuerpo frutoso de *A.ponderosa* en Almendres y Serpa (grupo a).
+
+En lo referente al contenido de minerales, tanto Almendres como Serpa también comparten el mismo grupo (a) pero la media de los minerales en el cuerpo frutoso de *A.ponderosa* en Almendres tampoco es significativamente diferente a las medias obtenidas en los diferentes "sites" agrupados en las letras b y c.
+
+De estos resultados concluimos que las medias de ninguna de las variables medidas (humedad, contenido orgánico y minerales) difieren significativamente entre Serpa y Almendres, y por tanto ambos "sites" son similares. Ambas mostrando un contenido significativamente mayor de humedad en el cuerpo frutoso de *A.ponderosa* y un contenido orgánico significativamente menor al de las muestras recogidas en diferentes "sites".
+
+### Estadísticos robustos de la humedad
+
+Los estadísticos robustos que mejor describen los datos son la mediana como medida de la tendencia central. El mínimo y el máximo también pueden ser útiles para conocer el recorrido de la variable, aunque son bastante sensibles a los outliers. Por ello nos centramos en los cuartiles, que indican la dispersión de los datos ignorando valores extremos.
+
+```{r}
+fivenum(contents$moisture)
+```
+
+En el caso de la humedad el valor mínimo de la variable es 87.31 y el valor máximo 94.86, lo que resume el recorrido de la variable. Con los cuartiles 90.355 y 92.895 se observa mejor la distribución de los valores de la humedad. Mientras la tendencia central obtenida mediante la mediana es 91.8.
+
+### Comparación de la composición mineral entre cuerpo fructífero y suelo
+
+```{r}
+#Unimos ambos dataframe
+minerales_total<-rbind(FB.df, SS.df)
+#Cambiamos el formato de los datos de ancho a largo (en forma de vector)
+len<-as.vector(as.matrix(minerales_total))
+#Genero un factor con 15 niveles y 432 veces (nº de variables y
+#nº de observaciones) con el nombre de los minerales
+vv<-gl(15,432, labels = colnames(minerales_total))
+#Genero un vector que me diferencia los minerales que corresponden a FB y a SS
+location<-rep(c(rep("FB",216),rep("SS",216)), 15)
+#Genero un boxplot cuyas cajas comparen todos los minerales de cada grupo y
+#el eje Y sea logarítmico como en el artículo.
+par(cex.axis = 0.45, cex.lab = 0.65)
+boxplot(len ~ location*vv, col=(c("brown", "gray")),
+        main = "Concentration of mineral content in FB and SS",
+        log="y", xlab="Minerals", ylab="Mineral content(mg/kg dw)", las=2,)
+
+```
+
+Se aprecia que el contenido de minerales tanto en el cuerpo frutoso (FB) como en las muestras de suelo (SS) varían de forma bastante similar para la mayoría de minerales analizados. Observando de esta manera la influencia de las características del sustrato en la composición del cuerpo frutoso de las muestras obtenidas en los diferentes "sites" \[1\].
+
+\newpage
+
+## Análisis de componentes principales (PCA)
+
+### PCA del cuerpo fructífero (FB)
+
+Procedemos a realizar el Análisis de Componentes Principales de la composición mineral de los cuerpos frutales (FB) de cada "site".
+
+```{r}
+#| warning: false
+#Función PCA
+analizar_pca <- function(datos_pca) {
+  pca <- prcomp(datos_pca, scale. = TRUE)
+  var_exp <- summary(pca)$importance[3, ]
+  n_comp <- which(var_exp >= 0.70)[1]
+  list(
+    pca      = pca,
+    cargas   = pca$rotation[, 1:n_comp],
+    varianza = round(pca$sdev^2 / sum(pca$sdev^2) * 100, 1)
+  )
+}
+
+FBsites <- with(contents, cbind(site, FB.df))
+#Agrupamos por la media del "site"
+FBmedias<-aggregate(.~site, FBsites, mean)
+#Cambiamos el nombre
+FBmedias$site<-sampling_sites[FBmedias$site]
+#Realizamos el análisis PCA
+resultado_fb <- analizar_pca(FBmedias[,-1])
+summary(resultado_fb$pca)$importance[,1:6]
+#Se miraron todos los minerales para estudiar la carga de cada uno
+kable(resultado_fb$cargas)
+#Realizamos el gráfico de dispersión con los dos primeros componentes
+xlab<-c(paste("PC1", resultado_fb$varianza[1],"%"))
+ylab<-c(paste("PC2", resultado_fb$varianza[2],"%"))
+site1<-FBmedias$site=="Azaruja"
+plot(resultado_fb$pca$x[,1], resultado_fb$pca$x[,2], pch=ifelse(site1,3,21),
+     col=ifelse(site1,"red","blue"), xlab=xlab, ylab=ylab)
+names2plot<-(substr((sampling_sites),0,3))
+text(resultado_fb$pca$x[,1],resultado_fb$pca$x[,2],names2plot, pos=1, cex=.6)
+```
+
+Teniendo los resultados del análisis de componentes principales, la primera componente tiene todos los valores negativos, exceptuando los valores del elemento plata y cromo. Esto se interpreta de tal forma que todos los elementos exceptuando la plata y el cromo están correlacionados en la misma dirección, es decir, si uno crece el otro también. Se puede observar que los tres elementos que más carga tienen dentro del primer componente son el magnesio, el manganeso y el zinc. Cabe destacar que los otros elementos también tienen una carga significativa (mayor de 0,2, teniendo en cuenta que la máxima carga, la del zinc, es de 0,38) exceptuando el bario, el cadmio, el cromo y el plomo.
+
+Mientras que la componente principal 2 tiene coeficientes negativos y positivos y las mayores cargas en valor absoluto se encuentran repartidas en los elementos cromo, bario y fósforo, mientras los de menor carga son el sodio, el manganeso y el zinc.
+
+Una vez descritas las dos primeras componentes principales, en el caso de Azaruja, que aparece arriba a la derecha en el biplot, y por tanto con un valor alto de PC1 y PC2. Un valor alto en la componente principal 1 se asocia a valores altos principalmente de plata y en menor medida (con una carga significativamente menor), cromo (unicos elementos con carga positiva). Y un valor alto en PC2 indica una concentración alta en fósforo y cobre (valores con mayores cargas positivas). Por lo tanto, se puede concluir que los cuerpos frutosos de *A.ponderosa* en Azaruja estan caracterizados por valores altos de plata, cromo, fósforo y cobre. Dadas sus características y sus coordenadas en el gráfico podría considerarse un sitio/valor atípico (outlier).
+
+Cabe mencionar que la varianza explicada de las dos componentes principales es relativamente baja (46,3%) y podría ocultar patrones dentro de los datos.
+
+### PCA del suelo (SS)
+
+Al realizar los mismos pasos que con el dataframe FB mostramos solo el output para hacer el informe más legible, el código se muestra en el anexo por si se quiere revisar.
+
+```{r}
+#| label: pca-ss
+#| echo: false
+#| warning: false
+SSsites <- with(contents, cbind(site, SS.df))
+SSmedias<-aggregate(.~site, SSsites, mean)
+SSmedias$site<-sampling_sites[SSmedias$site]
+resultado_ss <- analizar_pca(SSmedias[,-1])
+summary(resultado_ss$pca)$importance[,1:6]
+kable(resultado_ss$cargas)
+xlab<-c(paste("PC1", resultado_ss$varianza[1],"%"))
+ylab<-c(paste("PC2", resultado_ss$varianza[2],"%"))
+site2<-SSmedias$site=="Azaruja"|SSmedias$site=="Serpa"
+plot(resultado_ss$pca$x[,1], resultado_ss$pca$x[,2], pch=ifelse(site2,3,21),
+     col=ifelse(site2,"red","blue"), xlab=xlab,
+     ylab=ylab, ylim=range( resultado_ss$pca$x[,2])*1.2)
+text(resultado_ss$pca$x[,1],resultado_ss$pca$x[,2],names2plot, pos=4, cex=.5)
+```
+
+En el análisis de la composición mineral del suelo, la componente principal uno está caracterizada por tener valores positivos en todos los elementos menos en potasio y cadmio, teniendo las mayores cargas en los minerales hierro, calcio y fósforo. En la PC2 vuelven a aparecer coeficientes positivos y negativos, siendo mayor la carga en valor absoluto de los minerales sodio, cromo, magnesio y plomo, respectivamente.
+
+En este gráfico, a diferencia del estudio de los cuerpos frutosos, Azaruja aparece abajo a la izquierda, mostrando valores bajos en ambos componentes principales. Al contrario que Serpa que se encuentra arriba a la derecha. De esta forma, se infiere que la composición mineral del sustrato en Azaruja está caracterizada por altos valores de potasio, cadmio, (únicos valores negativos de PC1) sodio y magnesio (mayores cargas negativas en PC2). Y en Serpa está caracterizado por valores altos de cromo y plomo (elementos con mayor carga positiva que contribuyen al eje Y, de PC2) y valores mínimos de potasio y cadmio que son las cargas que afectan negativamente a PC1. Al haber muchas cargas con valor positivo y muchas de ellas con valores similares (0,25-0,40) no se puede determinar cuál de todos los elementos está influyendo en el PC1.
+
+Al igual que en el estudio de los cuerpos frutosos de *A. ponderosa* la varianza explicada de este análisis con los dos componentes principales sigue siendo baja, con un valor de 47,3%.
+
+### PCA de la relación cuerpo fructífero/suelo
+
+```{r}
+#| warning: false
+#Mostramos la transformación de los datos
+FBSS_division<-as.matrix(FBmedias[,-1])/as.matrix(SSmedias[,-1])
+FBSS_log<-log(FBSS_division)
+```
+
+```{r}
+#| label: pca-fbss
+#| echo: false
+resultado_fbss <- analizar_pca(FBSS_log)
+summary(resultado_fbss$pca)$importance[,1:6]
+kable(resultado_fbss$cargas)
+xlab<-c(paste("PC1", resultado_fbss$varianza[1],"%"))
+ylab<-c(paste("PC2", resultado_fbss$varianza[2],"%"))
+plot(resultado_fbss$pca$x[,1], resultado_fbss$pca$x[,2], pch=ifelse(site2,3,21), col=ifelse(site2,"red","blue"), xlab=xlab, ylab=ylab, ylim=range( resultado_fbss$pca$x[,2])*1.2)
+text(resultado_fbss$pca$x[,1],resultado_fbss$pca$x[,2],names2plot, pos=2, cex=.5)
+```
+
+En este caso los vectores propios del primer componente principal son todos negativos menos los de los elementos plata y cromo, mientras que en los de la segunda componente el mayor valor absoluto es del elemento cromo con una carga negativa.
+
+Aquí trabajamos con acumulaciones/concentraciones relativas a la seta o al suelo, y no con la concentración absoluta del suelo (SS) o del cuerpo frutoso (FB).
+
+En el caso de Azaruja, aparece en la parte derecha baja del gráfico, lo que indica un alto valor del PC1 y un valor bajo del PC2. Los valores altos del PC1 son debidos a una mayor concentración relativa de plata en Azaruja que en el resto de "sites" (su carga es 0,26 mientras que la carga del cromo que es la otra carga positiva es de 0,015). Mientras que el valor de PC2 está principalmente influenciado por el cromo, elemento que tiene la mayor carga negativa. Este valor bajo en PC2, indica que en Azaruja tiende a acumularse, en la relación *A. ponderosa*/suelo, más los elementos con valores negativos que los positivos.
+
+Y en el caso de Serpa, aparece en el 0 del PC1 y en la parte superior del gráfico, es el "site" con mayor valor de PC2. El valor alto en PC2 es el que nos aporta mayor información e indica que los elementos que más se acumulan/concentran en la relación seta/suelo son los elementos con mayor carga que afectan positivamente al PC2, es decir, el potasio, el aluminio y el cadmio.
+
+\newpage
+
+## Escalado multidimensional no métrico (NMDS)
+
+### Cálculo del NMDS
+
+Para analizar la composición química se utiliza la distancia de Bray-Curtis, una distancia no euclídea.
+
+La distancia de Bray-Curtis es una de las distancias más usadas en ecología y es conocida como disimilaridad de Bray-Curtis \[4\]. Procedemos a realizar un análisis de escalado multidimensional no métrico puesto que no vamos a usar las distancias euclídeas sino que vamos a buscar una aproximación de las distancias entre los "site" mediante la función isoMDS() del paquete MASS. Para ello obtenemos las disimilitudes entre los "sites" mediante la función vegdist() del paquete vegan.
+
+```{r}
+distancias<-vegdist(FBmedias[,-1], "bray")
+nmds<-isoMDS(distancias, trace=FALSE)
+nmds$stress
+```
+
+El stress es una medida que nos permite conocer si la forma en que se han repartido los puntos reproduce de manera correcta las distancias originales. Tiene un valor muy alto así que procedemos a usar otra función del paquete vegan, metaMDS() que nos permite usar isoMDS y la distancia Bray-Curtis pero es más flexible.
+
+```{r}
+set.seed(123)
+nmds2<-metaMDS(distancias, distance="bray", engine = "isoMDS", y = cmdscale(distancias), autotransform=FALSE, trace = FALSE)
+nmds2$stress
+```
+
+El stress ha mejorado con respecto al primer modelo; sin embargo, sigue siendo un valor bastante alto, cuando lo ideal es que esté por lo menos por debajo de 0.2. Por ello, probamos con otro engine que no sea isoMDS.
+
+```{r}
+set.seed(123)
+nmds3<- metaMDS(distancias, distance="bray", engine="monoMDS", trace = FALSE)
+nmds3$stress
+```
+
+Habiendo utilizado el engine "monoMDS" del paquete vegan, diseñado para distancias ecológicas y composiciones, hemos obtenido un valor de stress bastante bueno, por lo que procedemos a representar gráficamente los puntos.
+
+### Visualización del NMDS
+
+Representamos gráficamente los resultados.
+
+```{r}
+plot(nmds3$points[,1], nmds3$points[,2], type="n", las=2, xlab="NMDS1", ylab="NMDS2")
+text(nmds3$points[,1], nmds3$points[,2], labels = (FBmedias[,1]), cex=0.4)
+```
+
+Los puntos más cercanos son aquellos "sites" que tienen una composición más similar. Podemos apreciar cómo la composición del cuerpo frutoso de *A.ponderosa* Azaruja, comentado en el análisis de componentes principales, es un valor extremo junto con V. N. S. Bento y Beja.
+
+\newpage
+
+## Referencias
+
+\[1\] Cátia Salvador et al. (2018), A Data Mining Approach to Improve Inorganic Characterization of Amanita ponderosa Mushrooms. Int J Anal Chem., Jan 31; doi: 10.1155/2018/5265291
+
+\[2\] *Print en R*. (2023, noviembre 14). RCODER. <https://r-coder.com/print-en-r/>
+
+\[3\] *LSD.Test function - RDocumentation*. (s/f). Rdocumentation.org. <https://www.rdocumentation.org/packages/agricolae/versions/1.3-7/topics/LSD.test>
+
+\[4\] Espinosa, C. I. (s/f). *Capítulo 4 Distancias entre sitios*. Github.io. <https://ciespinosa.github.io/Similitud/distancias-entre-sitios.html#distancia-bray-curtis>
+
+## Anexo
+
+### Análisis exploratorio inicial de los datos
+
+```{r}
+dim(contents)
+str(contents)
+head(contents)
+```
+
+```{r}
+dim(FB.df)
+head(FB.df)
+```
+
+```{r}
+dim(SS.df)
+head(SS.df)
+```
+
+### Detalle del test LSD por variable
+
+```{r}
+#Función LSD
+hacer_lsd <- function(variable_respuesta, datos) {
+  formula <- as.formula(paste(variable_respuesta, "~ site"))
+  modelo <- aov(formula, data = datos)
+  resultado <- LSD.test(modelo, "site", 0.05)
+  kable(resultado$groups)
+}
+
+hacer_lsd("moisture", contents)
+```
+
+```{r}
+hacer_lsd("organic.content", contents)
+```
+
+```{r}
+hacer_lsd("minerals", contents)
+```
+
+### Código completo del PCA del suelo (SS)
+
+El código es exactamente el mismo que se ejecutó en la sección "PCA del suelo (SS)" (se reproduce aquí mediante `ref.label`, no está copiado a mano, así que no puede desincronizarse de la versión real):
+
+```{r}
+#| ref.label: "pca-ss"
+#| eval: false
+#| echo: true
+```
+
+### Código completo del PCA de la relación cuerpo fructífero/suelo
+
+Igualmente, el código real ya ejecutado en "PCA de la relación cuerpo fructífero/suelo":
+
+```{r}
+#| ref.label: "pca-fbss"
+#| eval: false
+#| echo: true
+```

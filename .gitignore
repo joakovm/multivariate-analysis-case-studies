@@ -1,0 +1,21 @@
+# R session / workspace files
+.Rproj.user/
+.Rhistory
+.Ruserdata
+*.RData
+*.Rda
+
+# Quarto: archivos auxiliares del renderizado (el PDF final SÍ se sube)
+/.quarto/
+*_files/
+*_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Datos crudos
+normality-clustering-discriminant-analysis/normality-clustering-discriminant-analysis/tabla_17_4_2.csv
+normality-clustering-discriminant-analysis/normality-clustering-discriminant-analysis/bulls.dat
+normality-clustering-discriminant-analysis/normality-clustering-discriminant-analysis/dat_dieta
+normality-clustering-discriminant-analysis/amanita-ponderosa-mineral-analysis/amanita_ponderosa

@@ -1,0 +1,505 @@
+---
+title: "Métodos de análisis multivariante: normalidad, clustering ecológico y clasificación discriminante"
+subtitle: "Contraste de normalidad multivariante, análisis de conglomerados aplicado a la dieta del búho real y análisis discriminante en razas bovinas"
+author: "Joaquín Villegas Martínez"
+date: today
+lang: es
+format:
+  pdf:
+    toc: true
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: true
+  tidy: true
+  eval: true
+editor: visual
+---
+
+```{r}
+#| include: false
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| include: false
+#| results: hide
+if (!requireNamespace("MVN", quietly = TRUE)) install.packages("MVN")
+library(MVN)
+#Nota: la comprobación original usaba "mvnnormtest" (con doble "n"), un nombre
+#de paquete que no existe; como consecuencia siempre reinstalaba el paquete
+#en cada render, aunque ya estuviera instalado. Aquí se usa el nombre correcto.
+if (!requireNamespace("mvnormtest", quietly = TRUE)) install.packages("mvnormtest")
+library(mvnormtest)
+library(kableExtra)
+if (!requireNamespace("vegan", quietly = TRUE)) install.packages("vegan")
+library(vegan)
+if (!requireNamespace("cluster", quietly = TRUE)) install.packages("cluster")
+library(cluster)
+if (!requireNamespace("stats", quietly = TRUE)) install.packages("stats")
+library(stats)
+library(MASS)
+```
+
+\newpage
+
+## Contraste de normalidad multivariante y prueba de Hotelling
+
+```{r}
+datos<-read.csv("tabla_17_4_2.csv")
+```
+
+### Contraste de normalidad univariante (Shapiro-Wilk)
+
+Calcular test univariantes no garantiza la normalidad multivariante. Estos test no tienen en cuenta la correlación de las variables y por tanto asumir que las variables de forma individual sigan una distribución normal y por lo tanto también una normalidad multivariante es erróneo (Everitt, 2005).
+
+```{r}
+#| fig-width: 3
+#| fig-height: 3
+#| fig-align: "center"
+norm<-function(x){
+  for (i in names(x)){
+    resultados<-shapiro.test(x[[i]]);
+    resultados$data.name <- i
+    print(resultados);
+
+     qqnorm(x[[i]],
+       main = paste(i));
+     qqline(x[[i]])
+  }
+}
+norm(datos)
+```
+
+Los datos de las variables inorganic y organic.not siguen una distribución normal (p-valor\>0.05, se acepta hipótesis nula). Mientras que en los datos de la variable inorganic se rechaza la hipótesis nula y se rechaza la normalidad de los datos. Aunque el test no sea significativo y por tanto considera la normalidad de los datos, cabe destacar un problema de desviación de los datos en la cola izquierda de la distribución en los datos procedentes de la variable organic.not en el QQ-plot realizado.
+
+### Contraste de normalidad multivariante
+
+La función mvn() nos permite estudiar la normalidad multivariante mediante el test de Mardia.
+
+```{r}
+mardia<-mvn(datos, mvn_test = "mardia")
+kable(mardia$multivariate_normality)
+kable(mardia$univariate_normality)
+```
+
+El resultado del test Mardia, basado en la asimetría y la curtosis multivariante, acepta la hipótesis nula y, por tanto, la normalidad multivariante de los datos (Everitt y Hothorn, 2011). Este test además da como resultado los tests de normalidad univariante, y tal y como se vio en el test Shapiro-Wilk del apartado anterior, los datos de la variable "inorganic" no siguen una distribución normal.
+
+Otra forma de comprobar la normalidad multivariante es observar si la distancia de Mahalanobis obtenida de los datos se ajusta a una distribución chi-cuadrado (Everitt y Hothorn, 2011).
+
+```{r}
+d<-mahalanobis(datos, center=colMeans(datos), cov=cov(datos))
+#Código adaptado de Everitt y Hothorn (2011)
+plot(qc<-qchisq((1:nrow(datos)-1/2) / nrow(datos), df = 3), sd<-sort(d),
+     xlab = expression(paste(chi[3]^2, "Quantil")),
+     ylab = "Distancias ordenadas")
+abline(a=0, b=1)
+```
+
+Como resultado observamos que hay una desviación de los datos en la cola derecha de la distribución que no se ajusta correctamente con la distribución teórica de chi-cuadrado. Dado este resultado, realizamos un test más estricto para comprobar la normalidad multivariante de los datos, así como el estudio de posibles outliers.
+
+```{r}
+mshapiro.test(t(as.matrix(datos)))
+```
+
+El resultado del test de Shapiro-Wilk multivariante nos lleva a la conclusión de que los datos no siguen una distribución normal multivariante, muy posiblemente relacionada con la variable "inorganic".
+
+### Detección de valores atípicos
+
+El estudio de outliers se puede llevar a cabo mediante el uso del gráfico anterior observando qué datos no se ajustan a la distribución teórica de Chi-cuadrado.
+
+```{r}
+plot(qc<-qchisq((1:nrow(datos)-1/2) / nrow(datos), df = 3), sd<-sort(d),
+     xlab = expression(paste(chi[3]^2, "Quantil")),
+     ylab = "Distancias ordenadas")
+#Código adaptado de Everitt y Hothorn (2011)
+outlier<- which(rank(abs(qc - sd), ties = "random") > nrow(datos) - 3)
+filas_ordenadas<-order(d)
+text(qc[outlier], sd[outlier],labels = filas_ordenadas[outlier], pos=1)
+abline(a = 0, b = 1)
+```
+
+En el gráfico se aprecia que aquellos puntos que menos se ajustan a la distribución de chi-cuadrado son los correspondientes a las observaciones 6, 3, 2 y 17.
+
+```{r}
+datos_limpios<-datos[-c(6, 3, 2),]
+mardia1<-mvn(datos_limpios, mvn_test = "mardia")
+kable(mardia1$multivariate_normality)
+kable(mardia1$univariate_normality)
+```
+
+```{r}
+mshapiro.test(t(as.matrix(datos_limpios)))
+```
+
+Eliminando los considerados outliers tanto los resultados de los test univariantes como el de Shapiro-Wilk multivariante validan la normalidad de los datos. No obstante, dado el reducido tamaño muestral (17 observaciones), la eliminación de 3 observaciones afectaría más al posterior análisis que aceptar la normalidad del test Mardia. Por lo que decidimos continuar el análisis con las 17 observaciones aceptando el resultado del test Mardia basado en la asimetría y la curtosis multivariante, considerado un estándar para proceder con otros test paramétricos (Everitt, 2005).
+
+### Contraste de medias mediante el estadístico T² de Hotelling
+
+Para contrastar ambas medias —la de los datos y la de referencia— se calculó el estadístico $T^{2}$ y su transformación a la distribución F, siguiendo las fórmulas descritas en Peña (2013, p. 293-294).
+
+```{r}
+n<-nrow(datos)
+p<-ncol(datos)
+mu<-c(4, 50, 10)
+medias<-colMeans(datos)
+S<-cov(datos)
+T2<- n * t(medias-mu) %*% solve(S) %*% (medias-mu)
+F.stat<- ((n - p) / (p * (n - 1))) * T2
+p.valor<-pf(F.stat, p, n-p, lower.tail = F)
+c(F.star=F.stat, p.valor=p.valor)
+```
+
+Tras aplicar el test $T^{2}$ de Hotelling, y bajo un nivel de significación de 0,1, hay suficiente evidencia estadística para rechazar la hipótesis nula, por lo que se concluye que existen diferencias significativas entre ambas medias.
+
+### Equivalencia con el contraste de Wilks
+
+```{r}
+# Se obtiene la matriz de covarianzas muestral sin corregir
+S1<-cov(datos) * (n - 1) / n
+# Obtenemos S0
+datos_mu0 <- sweep(datos, 2, mu)
+S0 <- (1/n) * (t(as.matrix(datos_mu0)) %*% (as.matrix(datos_mu0)))
+lambda_Wilks<-det(S1)/det(S0)
+lambda_Wilks
+#Aplicamos la fórmula
+1 / (1 + (T2 / (n - 1)))
+```
+
+Queda comprobado que ambos contrastes son equivalentes.
+
+\newpage
+
+## Análisis de conglomerados aplicado a la dieta del búho real
+
+```{r}
+load("dat_dieta.Rda")
+```
+
+### Análisis exploratorio de los datos
+
+Empezamos observando el tipo de datos y un esbozo de cómo son nuestros datos.
+
+```{r}
+str(dat_dieta)
+```
+
+Para continuar con el resumen descriptivo lo mejor es representar su distribución de manera visual con aquellos datos con los que vamos a trabajar (sin índices y con las columnas numéricas).
+
+```{r}
+ncol<-ncol(dat_dieta)
+dat_dieta_porc<-dat_dieta[,-c(1,2,3, ncol-1, ncol)]
+boxplot(dat_dieta_porc, las=2)
+```
+
+Lo que más destaca es el predominio de la proporción de conejos presente en la dieta de los búhos reales.
+
+Finalmente un pequeño resumen de los porcentajes relativos de capturas de los distintos tipos de presas en la dieta del búho real.
+
+```{r}
+summary(dat_dieta_porc)
+```
+
+Los datos muestran que hay una gran cantidad de ceros (al menos el 25% de los datos de muchos grupos son 0). Debido a esto, la distancia más apropiada para realizar un análisis de conglomerados es la de Bray-Curtis, puesto que la distancia euclídea incrementaría la similitud entre aquellas observaciones que presentan 0 para la misma presa (efecto de doble-cero) (Espinosa, 2022).
+
+Aunque en el boxplot predominen los conejos frente al resto de presas, no considero necesario estandarizar los porcentajes puesto que ya están en el mismo orden de magnitud (porcentajes relativos).
+
+### Análisis de conglomerados jerárquico: distancia de Bray-Curtis frente a euclídea
+
+Se realiza el análisis de conglomerados mediante la distancia de Bray-Curtis.
+
+```{r}
+dis_bray<-vegdist(dat_dieta_porc, method = "bray")
+clust<-hclust(dis_bray, method = "average")
+plot(clust, hang=-1)
+```
+
+También se realiza mediante la distancia euclídea, utilizando en ambos casos el método "average".
+
+```{r}
+dis_euc<-dist(dat_dieta_porc, method="euclidean")
+clust1<-hclust(dis_euc, method = "average")
+plot(clust1, hang=-1)
+```
+
+Aunque ambos análisis pueden mostrar una agrupación similar, el análisis de conglomerados usando la distancia euclídea muestra un grupo más con respecto al de Bray-Curtis. Aunque la partición adicional de un grupo más parezca insignificante, es crucial la correcta agrupación de las observaciones para evitar grupos con varias diferencias o agrupar observaciones en diferentes grupos cuando la diferencia no es significativa. El problema principal del uso de la distancia euclídea en este caso, en el que hay un grupo predominante, es que por su naturaleza eleva las diferencias al cuadrado por lo que la presencia de grupos pequeños pierde relevancia en el cálculo de la misma (puesto que las diferencias entre ellas serán de menor magnitud que las diferencias dentro de la variable conejo). Siendo esta la causa por la que se generó una partición adicional con la observación Melon_Inv_04.
+
+### Selección del número óptimo de conglomerados y clasificación k-means
+
+Para realizar un análisis de conglomerados k-means primero debemos determinar el número óptimo de conglomerados. Para ello hemos utilizado el método de la silueta.
+
+```{r}
+#Script adaptado de Carmona y Gregori (2019)
+set.seed(123)
+vsi <- c(0)
+for(i in 2:10){
+  si <- silhouette(cutree(clust, k=i), dis_bray)
+  vsi[i-1] <- mean(si[,"sil_width"])
+}
+plot(2:10,vsi,type="o",xlab="Number of clusters")
+title(main="Average silhouette")
+
+```
+
+Se obtiene claramente el pico con 2 clusters.
+
+También se aplica el método del codo.
+
+```{r}
+#Código adaptado de Everitt y Hothorn (2011)
+set.seed(123)
+n <- nrow(dat_dieta_porc)
+wss <- rep(0, 6)
+wss[1] <- (n - 1) * sum(sapply(dat_dieta_porc, var))
+for (i in 2:6)
+ wss[i] <- sum(kmeans(dat_dieta_porc,
+ centers = i)$withinss)
+plot(1:6, wss, type = "b", xlab = "Number of groups",
+     ylab = "Within groups sum of squares")
+```
+
+El codo parece encontrarse más en torno a 3 clusters que a 2.
+
+El análisis a continuación se ha realizado con 3 clusters por los resultados que se muestran a continuación mediante PCA, apoyado por la partición realizada por el análisis de conglomerados jerárquico utilizando la distancia Bray-Curtis.
+
+```{r}
+set.seed(123)
+km3<-kmeans(dat_dieta_porc, centers = 3)
+km3$center
+```
+
+Se realiza el análisis de componentes principales (PCA).
+
+```{r}
+set.seed(123)
+colores<-c("red", "blue", "green")
+grupos<-cutree(clust, k=3)
+PCA<-prcomp(dat_dieta_porc, scale. = TRUE)
+centroides<- predict(PCA, km3$centers)
+varianza<- round(PCA$sdev^2/sum(PCA$sdev^2)*100,1)
+xlab<-c(paste("PC1", varianza[1],"%"))
+ylab<-c(paste("PC2", varianza[2],"%"))
+plot(PCA$x[,1], PCA$x[,2], col=colores[grupos] , xlab=xlab, ylab=ylab)
+text(centroides[,1], centroides[,2], labels="x", col="black", font=2,cex=1)
+names2plot<-rownames(dat_dieta)
+text(PCA$x[,1], PCA$x[,2],names2plot, pos=2, cex=.6)
+
+```
+
+En este gráfico se puede apreciar cómo un grupo corresponde a una sola observación que puede ser considerada como outlier.
+
+### Interpretación de los grupos obtenidos
+
+Empezamos por el cluster con la observación que puede ser considerada como un outlier.
+
+```{r}
+out <- which.max(PCA$x[,2])
+rownames(dat_dieta_porc)[out]
+names(which.max(dat_dieta_porc[out, ]))
+```
+
+Esta observación corresponde a Ossa_Inv_08 donde el porcentaje relativo de presas de la dieta que predomina son los artrópodos y no el conejo.
+
+También hemos identificado las observaciones que corresponden al otro cluster que corresponde con el observado en el análisis jerárquico.
+
+```{r}
+
+cl2<-order(-PCA$x[, 1])[1:3]
+rownames(dat_dieta_porc)[cl2]
+```
+
+Este grupo se compone de aquellas observaciones con menor porcentaje relativo de conejo en la dieta (después de Ossa_Inv_08). Son observaciones con una dieta más variada, no centrada únicamente en el conejo, y que por tanto presentan un mayor índice de amplitud de nicho de Levins.
+
+Aún con un índice de Levins con valores altos en ciertas regiones, el índice de Shannon apenas supera los 0,5. Por lo que aunque los búhos reales de cierta región añadan más variedad de presas a su dieta, son una especie bastante especialista considerando como presa principal el conejo (Tobajas, 2012).
+
+### Validación mediante el algoritmo PAM
+
+Realizamos el análisis con la función pam() del paquete "cluster" de R.
+
+```{r}
+#| label: pam-analisis
+#Función reutilizada aquí y en el Anexo (evita repetir el mismo bloque con
+#distinto k). Dentro de la función, "pam" sigue siendo tanto el nombre de la
+#función de cluster::pam() como el de la variable que guarda su resultado;
+#R resuelve esto sin problema porque busca una función cuando el nombre se usa
+#en posición de llamada, así que se mantiene igual que en el resto del documento.
+analizar_pam <- function(k, col = NULL) {
+  set.seed(123)
+  pam <- pam(dat_dieta_porc, k, diss = FALSE)
+  print(pam$medoids)
+  plot(silhouette(pam), col = col)
+}
+
+analizar_pam(3, col = colores)
+```
+
+Tal y como muestra el gráfico resultante del estudio de silueta, se obtiene un mayor ancho de silueta promedio con dos grupos (0,56, ver Anexo) que con tres (0,3, el que muestra la figura). Esto es debido a que aunque se haya diferenciado un tercer grupo, las diferencias que separan el tercer cluster obtenido (el de 3 individuos) no son tan significativas como para considerarlo un cluster diferente a aquel que contiene la mayoría de observaciones.
+
+\newpage
+
+## Análisis discriminante en razas bovinas
+
+```{r}
+bulls<-read.table("bulls.dat", header = TRUE)
+bulls_limpio<-bulls[,-2]
+```
+
+### Comparación de variables entre razas (test de Kruskal-Wallis)
+
+Para estudiar si alguna de las variables parece diferenciar sus valores de una raza a otra, utilizaremos el test no paramétrico de Kruskal-Wallis, puesto que son más de dos razas las que queremos comparar (el resultado del código está en el Anexo; los resultados se muestran en formato de tabla para hacer más legible el documento).
+
+```{r}
+#| label: kruskal-loop
+#| eval: false
+ for (i in names(bulls_limpio)){
+    resultados<-kruskal.test(bulls_limpio[[i]] ~ bulls_limpio$Breed);
+    resultados$data.name <- i
+    print(resultados)
+ }
+```
+
+| Variable | Estadístico | Grados de libertad |  P-valor  |
+|:--------:|:-----------:|:------------------:|:---------:|
+|  YrHgt   |   38.542    |         2          | 4.273e-09 |
+| FtFrBody |   23.426    |         2          | 8.185e-06 |
+| PrctFFB  |   30.241    |         2          | 2.712e-07 |
+|  Frame   |   31.518    |         2          | 1.432e-07 |
+|  BkFat   |   39.769    |         2          | 2.314e-09 |
+|  SaleHt  |   45.213    |         2          | 1.521e-10 |
+|  SaleWt  |    4.529    |         2          |  0.1039   |
+
+La mejor forma de observar estas diferencias visualmente es mediante boxplots.
+
+```{r}
+par(mfrow=c(2, 4))
+for (i in names (bulls_limpio)){
+  boxplot(bulls_limpio[[i]] ~ bulls_limpio$Breed)
+}
+```
+
+Los boxplot revelan que las diferencias en los valores de las variables vienen dadas por la raza Simental (8) con respecto a las otras dos, cuyas variables tienen unos valores similares.
+
+### Relación entre variables: dispersión y correlación
+
+Se realizan los gráficos de dispersión para las variables numéricas dos a dos mediante la función pairs().
+
+```{r}
+pairs(bulls_limpio, col =c("red", "blue", "green")[as.factor(bulls_limpio$Breed)],
+      main = "Dispersión de variables por Raza")
+```
+
+También se calcula la matriz de correlaciones, ilustrada mediante un heatmap.
+
+```{r}
+correlacion<-cor(bulls_limpio)
+correlacion
+heatmap(correlacion, scale = "none")
+```
+
+Puesto que la mayoría de medidas son medidas asociadas a la altura y peso libre de grasas se puede apreciar cómo la variable que mide la grasa dorsal (BkFat) es la única que se correlaciona negativamente con el resto de variables, excepto en la variable del peso a la hora de la compra (SaleWt). Por otra parte se aprecia que la variable que hace referencia al tamaño/envergadura del toro (Frame) está correlacionada de manera casi perfecta con el crecimiento del toro al año (YrHgt).
+
+### Análisis discriminante lineal de Fisher
+
+El objetivo del análisis discriminante de Fisher es encontrar una función lineal que maximice la separación de las variables para poder clasificar observaciones usando estas mismas variables. El análisis puede llevarse a cabo usando la función lda() del paquete MASS de R (Everitt, 2005).
+
+```{r}
+library(MASS)
+modelo_lda<-lda(bulls_limpio[,-1], grouping=bulls_limpio$Breed)
+modelo_lda
+```
+
+Como resultado obtenemos dos variables discriminantes lineales, LD1 que recoge el 91,92% de variabilidad discriminante y el LD2 que recoge tan solo el 8,08%. Siendo la grasa dorsal (BkFat) la variable que más peso tiene, y por tanto mayor influencia en la separación de variables, en cada uno de los discriminantes lineales.
+
+Una vez generado el modelo, observamos la distribución de las razas.
+
+```{r}
+#| message: false
+#| warning: false
+library(ggplot2)
+factor<-as.factor(bulls_limpio$Breed)
+ggplot(bulls_limpio, aes(predict(modelo_lda)$x[,1], fill = factor)) +
+ geom_histogram(alpha = 0.2) + xlab("scores")
+```
+
+Los resultados de la primera variable discriminante marcan una clara separación entre las razas Simental (8) y las otras dos, observando el solapamiento de las razas Angus y Hereford.
+
+Procedemos a calcular la tabla de confusión mediante validación cruzada "jackknife".
+
+```{r}
+modelo_lda_CV<- lda(bulls_limpio[,-1], grouping=bulls_limpio$Breed, CV=TRUE)
+tabla_confusion<-table(class=modelo_lda_CV$class, true=bulls_limpio$Breed)
+tabla_confusion
+```
+
+Los resultados muestran que el modelo ha acertado 26 veces asignando los toros que corresponden a la raza Angus, 6 asignándolos a la raza Hereford y 24 a la raza Simental. Dado el solapamiento de los histogramas, y como ya se apreciaba en los boxplots, es esperable que el modelo tenga dificultades para diferenciar las razas Hereford y Angus. De ahí que el modelo muestre más errores al predecir la raza de los toros que se encuentran entre las razas Angus y Hereford que a la raza Simental (16 errores frente a 4).
+
+Por otra parte, la tasa de aciertos se calcula dividiendo los aciertos que tuvo el modelo entre el total de las predicciones.
+
+```{r}
+tasa_aciertos<-(sum(diag(tabla_confusion))/sum(tabla_confusion))
+tasa_aciertos
+```
+
+Obtenemos que el porcentaje de aciertos es de un 73,68%.
+
+### Representación de las razas en el espacio discriminante
+
+Representación de cada toro dadas sus coordenadas en el modelo.
+
+```{r}
+coordenadas<-predict(modelo_lda)$x
+colores <- c("red", "blue", "green")
+simbolos <- c(1, 6, 12)
+plot(coordenadas, pch=simbolos, col=colores, xlim=c(-5,7))
+niveles<-levels(as.factor(bulls_limpio$Breed))
+legend("topright", legend = niveles, col = colores, pch = simbolos)
+```
+
+### Clasificación de una nueva observación
+
+```{r}
+toro<- data.frame(YrHgt= 50, FtFrBody= 1000, PrctFFB= 73, Frame= 7, BkFat= .17, SaleHt= 54, SaleWt= 1525)
+predict(modelo_lda, newdata = toro)
+```
+
+El toro corresponde a la raza Angus con un 85,5% de probabilidad.
+
+\newpage
+
+## Referencias
+
+Carmona, F., & Gregori, J. (2019). Análisis de Conglomerados: Soluciones. Universitat Oberta de Catalunya (UOC).
+
+Espinosa, C. I. (2022). Capítulo 4: Distancias entre sitios. Similitud. <https://ciespinosa.github.io/Similitud/distancias-entre-sitios.html#distancia-bray-curtis>
+
+Everitt, B. (2005). An R and S-PLUS Companion to Multivariate Analysis. Springer.
+
+Everitt, B., & Hothorn, T. (2011). An Introduction to Applied Multivariate Analysis with R. Springer.
+
+Peña, D. (2013). Análisis de datos multivariantes. McGraw-Hill España. <https://elibro.net/es/ereader/uoc/50267?page=294>
+
+Tobajas González, J. (2012). Respuestas funcionales del búho real (*Bubo bubo*) ante los cambios en la abundancia de conejo (*Oryctolagus cuniculus*) en el centro de la Península Ibérica \[Trabajo de Fin de Máster\]. Instituto de Investigación en Recursos Cinegéticos (IREC, CSIC-UCLM-JCCM).
+
+\newpage
+
+## Anexo
+
+### Validación adicional: PAM con dos conglomerados
+
+```{r}
+analizar_pam(2)
+```
+
+### Código completo del contraste de Kruskal-Wallis
+
+El código es el mismo que se ejecutó (sin mostrar) en "Comparación de variables entre razas", reproducido aquí con `ref.label` para que no pueda quedar desincronizado de una copia manual:
+
+```{r}
+#| ref.label: "kruskal-loop"
+#| eval: true
+#| echo: true
+```
